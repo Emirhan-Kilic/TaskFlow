@@ -1,0 +1,206 @@
+-- Enhanced Enums
+CREATE TYPE role_enum AS ENUM ('admin', 'manager', 'personnel');
+CREATE TYPE task_status_enum AS ENUM ('To Do', 'In Progress', 'Under Review', 'Completed');
+CREATE TYPE notification_type_enum AS ENUM ('email', 'sms', 'push');
+CREATE TYPE priority_enum AS ENUM ('Low', 'Medium', 'High', 'Critical');
+
+
+CREATE TABLE users (
+    id bigint primary key generated always as identity,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    role role_enum NOT NULL,
+    department_id bigint, -- Temporarily remove the foreign key constraint
+    profile_picture VARCHAR(255),
+    display_name VARCHAR(100),
+    job_title VARCHAR(100),
+    last_login TIMESTAMP,
+    created_at TIMESTAMP with time zone DEFAULT NOW(),
+    updated_at TIMESTAMP with time zone DEFAULT NOW(),
+    auth_uid UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- Departments Table with Enhanced Fields (without foreign key constraint)
+CREATE TABLE departments (
+    id bigint primary key generated always as identity,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    manager_id bigint, -- Temporarily remove the foreign key constraint
+    employee_count INT DEFAULT 0,
+    description TEXT,
+    created_at TIMESTAMP with time zone DEFAULT NOW(),
+    updated_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Add foreign key constraints after both tables are created
+ALTER TABLE users
+ADD CONSTRAINT fk_department
+FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL;
+
+ALTER TABLE departments
+ADD CONSTRAINT fk_manager
+FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL;
+
+
+-- Task Templates Table (New)
+CREATE TABLE task_templates (
+    id bigint primary key generated always as identity,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    default_priority priority_enum,
+    estimated_duration INTERVAL,
+    department_id bigint REFERENCES departments(id),
+    created_by bigint REFERENCES users(id) NOT NULL,
+    created_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Enhanced Tasks Table
+CREATE TABLE tasks (
+    id bigint primary key generated always as identity,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    department_id bigint REFERENCES departments(id) NOT NULL,
+    created_by bigint REFERENCES users(id) NOT NULL,
+    priority priority_enum DEFAULT 'Medium',
+    due_date TIMESTAMP,
+    start_date TIMESTAMP,
+    version INT DEFAULT 1,
+    template_id bigint REFERENCES task_templates(id),
+    created_at TIMESTAMP with time zone DEFAULT NOW(),
+    updated_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Task Dependencies Table (New)
+CREATE TABLE task_dependencies (
+    id bigint primary key generated always as identity,
+    task_id bigint REFERENCES tasks(id) NOT NULL,
+    depends_on bigint REFERENCES tasks(id) NOT NULL,
+    dependency_type VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Enhanced Task Assignments Table
+CREATE TABLE task_assignments (
+    id bigint primary key generated always as identity,
+    task_id bigint REFERENCES tasks(id) NOT NULL,
+    assigned_to bigint REFERENCES users(id) NOT NULL,
+    status task_status_enum DEFAULT 'To Do',
+    progress INT DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    comments TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    version INT DEFAULT 1,
+    created_at TIMESTAMP with time zone DEFAULT NOW(),
+    updated_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Enhanced Task Attachments Table
+CREATE TABLE task_attachments (
+    id bigint primary key generated always as identity,
+    task_id bigint REFERENCES tasks(id) NOT NULL,
+    file_path VARCHAR(255) NOT NULL,
+    file_type VARCHAR(50) NOT NULL,
+    file_size BIGINT NOT NULL CHECK (file_size > 0),
+    thumbnail_path VARCHAR(255),
+    uploaded_by bigint REFERENCES users(id) NOT NULL,
+    uploaded_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Enhanced Notifications Table
+CREATE TABLE notifications (
+    id bigint primary key generated always as identity,
+    user_id bigint REFERENCES users(id) NOT NULL,
+    task_id bigint REFERENCES tasks(id),
+    type notification_type_enum NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    is_read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Enhanced Calendar Events Table
+CREATE TABLE calendar_events (
+    id bigint primary key generated always as identity,
+    task_id bigint REFERENCES tasks(id) NOT NULL,
+    user_id bigint REFERENCES users(id) NOT NULL,
+    external_id VARCHAR(255) NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP NOT NULL,
+    service_type VARCHAR(50) NOT NULL,
+    sync_token VARCHAR(255),
+    last_synced TIMESTAMP,
+    created_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+
+-- Enhanced Performance Metrics Table
+CREATE TABLE performance_metrics (
+    id bigint primary key generated always as identity,
+    user_id bigint REFERENCES users(id) NOT NULL,
+    department_id bigint REFERENCES departments(id) NOT NULL,
+    tasks_completed INT DEFAULT 0 CHECK (tasks_completed >= 0),
+    avg_completion_time INTERVAL,
+    efficiency_ratio FLOAT,
+    quality_rating FLOAT CHECK (quality_rating BETWEEN 0 AND 5),
+    measured_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+
+-- New Backlog Metrics Table
+CREATE TABLE backlog_metrics (
+    id bigint primary key generated always as identity,
+    department_id bigint REFERENCES departments(id) NOT NULL,
+    overdue_tasks INT DEFAULT 0 CHECK (overdue_tasks >= 0),
+    high_priority_tasks INT DEFAULT 0 CHECK (high_priority_tasks >= 0),
+    avg_delay INTERVAL,
+    measured_at TIMESTAMP with time zone DEFAULT NOW()
+);
+
+-- Index Enhancements
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_tasks_due_date ON tasks(due_date);
+CREATE INDEX idx_assignments_assigned ON task_assignments(assigned_to);
+CREATE INDEX idx_events_service ON calendar_events(service_type);
+
+
+
+CREATE TABLE subdepartments (
+    id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    department_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    manager_id BIGINT,
+    employee_count INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (department_id, name)
+);
+
+ALTER TABLE subdepartments
+ADD CONSTRAINT fk_subdepartments_department
+FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE;
+
+ALTER TABLE subdepartments
+ADD CONSTRAINT fk_subdepartments_manager
+FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE subdepartmentParticipations (
+    id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    subdepartment_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    role VARCHAR(50), -- Consider using ENUM if roles are fixed
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (subdepartment_id, user_id)
+);
+
+ALTER TABLE subdepartmentParticipations
+ADD CONSTRAINT fk_subdepartmentParticipations_subdepartment
+FOREIGN KEY (subdepartment_id) REFERENCES subdepartments(id) ON DELETE CASCADE;
+
+ALTER TABLE subdepartmentParticipations
+ADD CONSTRAINT fk_subdepartmentParticipations_user
+FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+-- Optional: Create indexes for better performance
+CREATE INDEX idx_subdepartments_department_id ON subdepartments(department_id);
+CREATE INDEX idx_subdepartments_manager_id ON subdepartments(manager_id);
+CREATE INDEX idx_subdepartmentParticipations_subdepartment_id ON subdepartmentParticipations(subdepartment_id);
+CREATE INDEX idx_subdepartmentParticipations_user_id ON subdepartmentParticipations(user_id);
